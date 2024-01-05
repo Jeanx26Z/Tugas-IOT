@@ -1,0 +1,144 @@
+#include <Arduino.h>
+#include <ESP8266WiFi.h>
+#include <PubSubClient.h>
+#include <Servo.h>
+#include <HX711.h>
+
+#define pinEcho D8
+#define pinTrig D7
+
+Servo servo;
+
+const int LOADCELL_DOUT_PIN = D5;
+const int LOADCELL_SCK_PIN = D6;
+
+int duration;
+int distance;
+int weight;
+
+HX711 scale;
+
+// WiFi
+const char *ssid = "jarum pentul";
+const char *password = "gulagaram";
+
+// MQTT Broker
+const char *mqtt_broker = "broker.emqx.io";
+const char *topic = "KelompokPanitia";
+const char *mqtt_username = "panitia";
+const char *mqtt_password = "panitia";
+const int mqtt_port = 1883;
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+uint32_t counter;
+char str[80];
+
+void callback(char *topic, byte *payload, unsigned int length){}
+
+void setup()
+{
+  Serial.begin(9600);
+  pinMode(pinTrig, OUTPUT);
+  pinMode(pinEcho, INPUT);
+  setup2();
+  servo.attach(2);
+  scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
+
+  scale.set_scale(290.252);
+  scale.tare();
+
+}
+
+void loop()
+{
+  digitalWrite(pinTrig, LOW);
+  delayMicroseconds(2);
+  digitalWrite(pinTrig, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(pinTrig, LOW);
+  duration = pulseIn(pinEcho, HIGH);
+  distance = duration / 58.2;
+
+  if (distance <= 35)
+  {
+    if (weight <= 150){
+    open_tutup();
+    }
+  }
+  else
+  {
+    close_tutup();
+  }
+
+  loop2();
+
+  // Mengirim data berat dari sensor load cell melalui MQTT
+  Serial.print("Berat sampah:\t");
+  weight = scale.get_units(1); // Membaca data berat dari sensor load cell
+  Serial.println(weight, 1);
+
+
+  scale.power_down();
+  delay(1000);
+  scale.power_up();
+}
+
+void setup2()
+{
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    delay(500);
+    Serial.println("Connecting to WiFi..");
+  }
+  Serial.println("Connected to the WiFi network");
+
+  // connecting to an MQTT broker
+  client.setServer(mqtt_broker, mqtt_port);
+  client.setCallback(callback);
+
+  while (!client.connected())
+  {
+    String client_id = "mqttx_233d5108";
+    client_id += String(WiFi.macAddress());
+    Serial.printf("The client %s connects to the public mqtt broker\n", client_id.c_str());
+    if (client.connect(client_id.c_str(), mqtt_username, mqtt_password))
+    {
+      Serial.println("Public emqx mqtt broker connected");
+    }
+    else
+    {
+      Serial.print("failed with state ");
+      Serial.print(client.state());
+      delay(2000);
+    }
+  }
+
+ 
+  client.publish(topic, "Tepuk Pramuka");
+  client.subscribe(topic);
+}
+
+void open_tutup()
+{
+  servo.write(-90);
+  delay(500);
+}
+
+void close_tutup()
+{
+  servo.write(180);
+  delay(1000);
+}
+
+void loop2()
+{
+  client.loop();
+  int sensor;
+  sensor = random(30, 50);
+  sprintf(str, "%i", weight);
+  counter++;
+  client.publish(topic, str);
+  delay(500);
+}
